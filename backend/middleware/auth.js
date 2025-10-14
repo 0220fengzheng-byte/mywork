@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const SupabaseUserService = require('../services/supabaseUserService');
+const supabaseUserService = new SupabaseUserService();
 
 const auth = async (req, res, next) => {
   try {
@@ -10,17 +11,19 @@ const auth = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.userId).select('-password -refreshTokens');
+    const user = await supabaseUserService.findById(decoded.userId);
     
     if (!user) {
       return res.status(401).json({ message: 'Invalid token. User not found.' });
     }
 
-    if (!user.isActive) {
+    if (!user.is_active) {
       return res.status(401).json({ message: 'Account is deactivated.' });
     }
 
-    req.user = user;
+    // 移除敏感信息并设置用户信息
+    const { password_hash, ...userInfo } = user;
+    req.user = { ...userInfo, _id: user.id }; // 保持兼容性，添加_id字段
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {

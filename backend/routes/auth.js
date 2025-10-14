@@ -1,16 +1,11 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { generateTokens, verifyRefreshToken } = require('../utils/jwt');
 const { auth } = require('../middleware/auth');
-const { mockUsers } = require('../utils/mockData');
+const supabaseUserService = require('../services/supabaseUserService');
 
 const router = express.Router();
-
-// 模拟数据库操作
-let users = [...mockUsers];
-let refreshTokens = new Set();
 
 // 登录
 router.post('/login', [
@@ -29,36 +24,41 @@ router.post('/login', [
     const { email, password } = req.body;
 
     // 查找用户
-    const user = users.find(u => u.email === email);
+    const user = await supabaseUserService.findByEmail(email);
     if (!user) {
       return res.status(401).json({ message: '邮箱或密码错误' });
     }
 
     // 验证密码
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    const isPasswordValid = await supabaseUserService.comparePassword(password, user.password);
     if (!isPasswordValid) {
       return res.status(401).json({ message: '邮箱或密码错误' });
     }
 
     // 检查用户是否激活
-    if (!user.isActive) {
+    if (!user.is_active) {
       return res.status(401).json({ message: '账户已被禁用' });
     }
 
     // 生成tokens
-    const { accessToken, refreshToken } = generateTokens(user._id);
-    refreshTokens.add(refreshToken);
+    const { accessToken, refreshToken } = generateTokens(user.id);
+    
+    // 保存刷新令牌到数据库
+    await supabaseUserService.addRefreshToken(user.id, refreshToken);
+    
+    // 更新最后登录时间
+    await supabaseUserService.updateLastLogin(user.id);
 
     // 返回用户信息（不包含密码）
     const userResponse = {
-      _id: user._id,
+      _id: user.id,
       email: user.email,
       name: user.name,
       role: user.role,
       department: user.department,
       phone: user.phone,
       avatar: user.avatar,
-      isEmailVerified: user.isEmailVerified
+      isEmailVerified: user.is_email_verified
     };
 
     res.json({
@@ -92,44 +92,37 @@ router.post('/register', [
     const { email, password, name, department, phone } = req.body;
 
     // 检查用户是否已存在
-    const existingUser = users.find(u => u.email === email);
+    const existingUser = await supabaseUserService.findByEmail(email);
     if (existingUser) {
       return res.status(400).json({ message: '该邮箱已被注册' });
     }
 
     // 创建新用户
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = {
-      _id: Date.now().toString(), // 简单的ID生成
+    const newUser = await supabaseUserService.createUser({
       email,
-      password: hashedPassword,
+      password,
       name,
-      role: 'user',
+      role: 'member',
       department: department || '',
-      phone: phone || '',
-      isActive: true,
-      isEmailVerified: true, // 简化验证流程
-      avatar: null,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    users.push(newUser);
+      phone: phone || ''
+    });
 
     // 生成tokens
-    const { accessToken, refreshToken } = generateTokens(newUser._id);
-    refreshTokens.add(refreshToken);
+    const { accessToken, refreshToken } = generateTokens(newUser.id);
+    
+    // 保存刷新令牌到数据库
+    await supabaseUserService.addRefreshToken(newUser.id, refreshToken);
 
     // 返回用户信息（不包含密码）
     const userResponse = {
-      _id: newUser._id,
+      _id: newUser.id,
       email: newUser.email,
       name: newUser.name,
       role: newUser.role,
       department: newUser.department,
       phone: newUser.phone,
       avatar: newUser.avatar,
-      isEmailVerified: newUser.isEmailVerified
+      isEmailVerified: newUser.is_email_verified
     };
 
     res.status(201).json({
@@ -160,25 +153,27 @@ router.post('/refresh', [
 
     const { refreshToken } = req.body;
 
-    if (!refreshTokens.has(refreshToken)) {
+    // 验证刷新令牌
+    const userId = await supabaseUserService.validateRefreshToken(refreshToken);
+    if (!userId) {
       return res.status(401).json({ message: '无效的刷新token' });
     }
 
     try {
       const decoded = verifyRefreshToken(refreshToken);
-      const user = users.find(u => u._id === decoded.userId);
+      const user = await supabaseUserService.findById(userId);
       
-      if (!user || !user.isActive) {
-        refreshTokens.delete(refreshToken);
+      if (!user || !user.is_active) {
+        await supabaseUserService.removeRefreshToken(refreshToken);
         return res.status(401).json({ message: '用户不存在或已被禁用' });
       }
 
       // 生成新的tokens
-      const { accessToken, refreshToken: newRefreshToken } = generateTokens(user._id);
+      const { accessToken, refreshToken: newRefreshToken } = generateTokens(user.id);
       
       // 移除旧的refresh token，添加新的
-      refreshTokens.delete(refreshToken);
-      refreshTokens.add(newRefreshToken);
+      await supabaseUserService.removeRefreshToken(refreshToken);
+      await supabaseUserService.addRefreshToken(user.id, newRefreshToken);
 
       res.json({
         token: accessToken,
@@ -186,7 +181,7 @@ router.post('/refresh', [
       });
 
     } catch (error) {
-      refreshTokens.delete(refreshToken);
+      await supabaseUserService.removeRefreshToken(refreshToken);
       return res.status(401).json({ message: '无效的刷新token' });
     }
 
@@ -201,7 +196,7 @@ router.post('/logout', auth, async (req, res) => {
   try {
     const refreshToken = req.body.refreshToken;
     if (refreshToken) {
-      refreshTokens.delete(refreshToken);
+      await supabaseUserService.removeRefreshToken(refreshToken);
     }
 
     res.json({ message: '登出成功' });

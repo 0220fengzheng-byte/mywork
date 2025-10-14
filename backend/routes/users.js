@@ -3,8 +3,8 @@ const { body, validationResult } = require('express-validator');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const User = require('../models/User');
-const UserNotificationSettings = require('../models/UserNotificationSettings');
+const SupabaseUserService = require('../services/supabaseUserService');
+const supabaseUserService = new SupabaseUserService();
 const { auth, adminAuth } = require('../middleware/auth');
 
 const router = express.Router();
@@ -45,8 +45,14 @@ const upload = multer({
 // 获取个人信息
 router.get('/profile', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('-password -refreshTokens');
-    res.json(user);
+    const user = await supabaseUserService.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: '用户不存在' });
+    }
+    
+    // 移除敏感信息
+    const { password_hash, ...userProfile } = user;
+    res.json(userProfile);
   } catch (error) {
     console.error('Get profile error:', error);
     res.status(500).json({ message: '服务器错误' });
@@ -72,15 +78,14 @@ router.put('/profile', auth, [
     if (department !== undefined) updateData.department = department;
     if (phone !== undefined) updateData.phone = phone;
 
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      updateData,
-      { new: true, runValidators: true }
-    ).select('-password -refreshTokens');
+    const user = await supabaseUserService.updateUser(req.user._id, updateData);
+    
+    // 移除敏感信息
+    const { password_hash, ...userProfile } = user;
 
     res.json({
       message: '个人信息更新成功',
-      user
+      user: userProfile
     });
   } catch (error) {
     console.error('Update profile error:', error);
@@ -101,19 +106,21 @@ router.put('/password', auth, [
 
     const { currentPassword, newPassword } = req.body;
 
-    // 获取完整用户信息（包含密码）
-    const user = await User.findById(req.user._id);
+    // 获取用户信息
+    const user = await supabaseUserService.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: '用户不存在' });
+    }
     
     // 验证当前密码
-    const isMatch = await user.comparePassword(currentPassword);
+    const isMatch = await supabaseUserService.comparePassword(user.id, currentPassword);
     if (!isMatch) {
       return res.status(400).json({ message: '当前密码错误' });
     }
 
-    // 更新密码
-    user.password = newPassword;
-    user.refreshTokens = []; // 清除所有刷新令牌，强制重新登录
-    await user.save();
+    // 更新密码并清除所有刷新令牌
+    await supabaseUserService.updateUser(user.id, { password: newPassword });
+    await supabaseUserService.clearAllRefreshTokens(user.id);
 
     res.json({ message: '密码修改成功，请重新登录' });
   } catch (error) {

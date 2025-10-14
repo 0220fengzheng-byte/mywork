@@ -4,10 +4,14 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const moment = require('moment');
-const Project = require('../models/Project');
-const User = require('../models/User');
+const SupabaseProjectService = require('../services/supabaseProjectService');
+const SupabaseUserService = require('../services/supabaseUserService');
+const SupabaseNotificationService = require('../services/supabaseNotificationService');
+
+const supabaseProjectService = new SupabaseProjectService();
+const supabaseUserService = new SupabaseUserService();
+const supabaseNotificationService = new SupabaseNotificationService();
 const { auth } = require('../middleware/auth');
-const notificationService = require('../services/notificationService');
 
 const router = express.Router();
 
@@ -70,45 +74,22 @@ router.get('/', auth, [
       sortOrder = 'desc'
     } = req.query;
 
-    // 构建查询条件
-    const query = { isArchived: false };
+    // 构建查询选项
+    const queryOptions = {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      status,
+      priority,
+      assigneeId,
+      requesterId,
+      search,
+      view,
+      sortBy,
+      sortOrder
+    };
 
-    // 视图筛选
-    if (view === 'new') {
-      query.status = { $in: ['未开始', '进行中', '暂停'] };
-    } else if (view === 'thisweek') {
-      const startOfWeek = moment().startOf('week').toDate();
-      const endOfWeek = moment().endOf('week').toDate();
-      query.deadline = { $gte: startOfWeek, $lte: endOfWeek };
-      query.status = { $ne: '已完成' };
-    } else if (view === 'history') {
-      query.status = '已完成';
-    }
-
-    // 其他筛选条件
-    if (status) query.status = status;
-    if (priority) query.priority = priority;
-    if (assigneeId) query.assigneeId = assigneeId;
-    if (requesterId) query.requesterId = requesterId;
-
-    // 搜索
-    if (search) {
-      query.$text = { $search: search };
-    }
-
-    // 排序
-    const sortOptions = {};
-    sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
-
-    const projects = await Project.find(query)
-      .populate('requesterId', 'name email')
-      .populate('assigneeId', 'name email')
-      .populate('createdBy', 'name email')
-      .sort(sortOptions)
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await Project.countDocuments(query);
+    const result = await supabaseProjectService.getProjects(queryOptions);
+    const { projects, total } = result;
 
     res.json({
       projects,
@@ -125,11 +106,7 @@ router.get('/', auth, [
 // 获取项目详情
 router.get('/:id', auth, async (req, res) => {
   try {
-    const project = await Project.findById(req.params.id)
-      .populate('requesterId', 'name email avatar')
-      .populate('assigneeId', 'name email avatar')
-      .populate('createdBy', 'name email')
-      .populate('timeEntries.userId', 'name email');
+    const project = await supabaseProjectService.getProjectById(req.params.id);
 
     if (!project) {
       return res.status(404).json({ message: '项目不存在' });
@@ -159,33 +136,24 @@ router.post('/', auth, [
 
     const projectData = {
       ...req.body,
-      requesterId: req.user._id,
-      createdBy: req.user._id
+      requester_id: req.user._id,
+      created_by: req.user._id
     };
 
     if (req.body.deadline) {
       projectData.deadline = new Date(req.body.deadline);
     }
 
-    const project = new Project(projectData);
-    await project.save();
-
-    await project.populate([
-      { path: 'requesterId', select: 'name email' },
-      { path: 'assigneeId', select: 'name email' },
-      { path: 'createdBy', select: 'name email' }
-    ]);
+    const project = await supabaseProjectService.createProject(projectData);
 
     // 发送通知
-    if (project.assigneeId && project.assigneeId._id.toString() !== req.user._id.toString()) {
-      await notificationService.createNotification({
-        userId: project.assigneeId._id,
-        senderId: req.user._id,
-        type: 'assignment',
-        title: '新项目分配',
-        content: `您被分配了新项目：${project.name}`,
-        relatedProjectId: project._id
-      });
+    if (project.assignee_id && project.assignee_id !== req.user._id) {
+      await supabaseNotificationService.sendProjectAssignmentNotification(
+        project.assignee_id,
+        req.user._id,
+        project.id,
+        project.name
+      );
     }
 
     res.status(201).json({
@@ -213,14 +181,14 @@ router.put('/:id', auth, [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const project = await Project.findById(req.params.id);
+    const project = await supabaseProjectService.getProjectById(req.params.id);
     if (!project) {
       return res.status(404).json({ message: '项目不存在' });
     }
 
     // 检查权限
-    const canEdit = project.requesterId.toString() === req.user._id.toString() ||
-                   project.assigneeId?.toString() === req.user._id.toString() ||
+    const canEdit = project.requester_id === req.user._id ||
+                   project.assignee_id === req.user._id ||
                    req.user.role === 'admin';
 
     if (!canEdit) {
@@ -228,55 +196,36 @@ router.put('/:id', auth, [
     }
 
     const oldStatus = project.status;
-    const oldAssigneeId = project.assigneeId?.toString();
+    const oldAssigneeId = project.assignee_id;
 
     // 更新项目
-    const updateData = { ...req.body, updatedBy: req.user._id };
+    const updateData = { ...req.body, updated_by: req.user._id };
     if (req.body.deadline) {
       updateData.deadline = new Date(req.body.deadline);
     }
 
-    const updatedProject = await Project.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).populate([
-      { path: 'requesterId', select: 'name email' },
-      { path: 'assigneeId', select: 'name email' },
-      { path: 'createdBy', select: 'name email' }
-    ]);
+    const updatedProject = await supabaseProjectService.updateProject(req.params.id, updateData);
 
     // 发送状态变更通知
     if (oldStatus !== updatedProject.status) {
-      const notificationUsers = [updatedProject.requesterId._id];
-      if (updatedProject.assigneeId && updatedProject.assigneeId._id.toString() !== updatedProject.requesterId._id.toString()) {
-        notificationUsers.push(updatedProject.assigneeId._id);
-      }
-
-      for (const userId of notificationUsers) {
-        if (userId.toString() !== req.user._id.toString()) {
-          await notificationService.createNotification({
-            userId,
-            senderId: req.user._id,
-            type: 'status_change',
-            title: '项目状态变更',
-            content: `项目"${updatedProject.name}"状态已变更为：${updatedProject.status}`,
-            relatedProjectId: updatedProject._id
-          });
-        }
-      }
+      await supabaseNotificationService.sendStatusChangeNotification(
+        updatedProject.requester_id,
+        updatedProject.assignee_id,
+        req.user._id,
+        updatedProject.id,
+        updatedProject.name,
+        updatedProject.status
+      );
     }
 
     // 发送分配变更通知
     if (req.body.assigneeId && oldAssigneeId !== req.body.assigneeId) {
-      await notificationService.createNotification({
-        userId: req.body.assigneeId,
-        senderId: req.user._id,
-        type: 'assignment',
-        title: '项目重新分配',
-        content: `您被重新分配了项目：${updatedProject.name}`,
-        relatedProjectId: updatedProject._id
-      });
+      await supabaseNotificationService.sendProjectAssignmentNotification(
+        req.body.assigneeId,
+        req.user._id,
+        updatedProject.id,
+        updatedProject.name
+      );
     }
 
     res.json({
