@@ -1,0 +1,22 @@
+{
+  "comment": "Vercel环境变量配置文件 - 请填写实际值后使用脚本导入",
+  "production": {
+    "PORT": "5000",
+    "NODE_ENV": "production",
+    "SUPABASE_URL": "请填写你的Supabase项目URL",
+    "SUPABASE_ANON_KEY": "请填写你的Supabase匿名密钥",
+    "SUPABASE_SERVICE_ROLE_KEY": "请填写你的Supabase服务角色密钥",
+    "JWT_SECRET": "请填写你的JWT密钥（建议使用随机字符串）",
+    "EMAIL_HOST": "smtp.mxhichina.com",
+    "EMAIL_PORT": "465",
+    "EMAIL_USER": "请填写你的企业邮箱地址",
+    "EMAIL_PASS": "请填写你的邮箱密码",
+    "EMAIL_FROM_NAME": "项目管理系统",
+    "FRONTEND_URL": "请填写你的Vercel前端域名"
+  },
+  "instructions": {
+    "1": "填写上述环境变量的实际值",
+    "2": "运行命令: node scripts/import-vercel-env.js",
+    "3": "或者手动复制值到Vercel控制台"
+  }
+}
