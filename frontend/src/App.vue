@@ -1,17 +1,12 @@
 <template>
   <div id="app">
-    <HeaderBar v-if="showHeader" />
+    <HeaderBar />
     <router-view />
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
 import HeaderBar from './components/HeaderBar.vue'
-
-const route = useRoute()
-const showHeader = computed(() => !['/login','/register','/forgot-password'].includes(route.path))
 </script>
 
 <style>

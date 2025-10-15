@@ -4,14 +4,23 @@ import { usersAPI } from '../api/users'
 import { authAPI } from '../api/auth'
 
 export const useUserStore = defineStore('user', () => {
+  // 默认用户信息
+  const defaultUser = {
+    id: 1,
+    name: '默认用户',
+    email: 'user@example.com',
+    department: '产品部',
+    phone: '13800138000',
+    role: 'user',
+    avatar: ''
+  }
+
   // 状态
-  const user = ref(null)
-  const token = ref(localStorage.getItem('token'))
-  const refreshToken = ref(localStorage.getItem('refreshToken'))
+  const user = ref(defaultUser)
   const isLoading = ref(false)
 
   // 计算属性
-  const isAuthenticated = computed(() => !!token.value && !!user.value)
+  const isAuthenticated = computed(() => true) // 始终认为已认证
   const isAdmin = computed(() => user.value?.role === 'admin')
   const userName = computed(() => user.value?.name || '')
   const userEmail = computed(() => user.value?.email || '')
@@ -19,49 +28,20 @@ export const useUserStore = defineStore('user', () => {
 
   // 设置用户信息
   const setUser = (userData) => {
-    user.value = userData
-    localStorage.setItem('user', JSON.stringify(userData))
-  }
-
-  // 设置token
-  const setToken = (tokenValue, refreshTokenValue = null) => {
-    token.value = tokenValue
-    localStorage.setItem('token', tokenValue)
-    
-    if (refreshTokenValue) {
-      refreshToken.value = refreshTokenValue
-      localStorage.setItem('refreshToken', refreshTokenValue)
-    }
-  }
-
-  // 清除用户信息
-  const clearUser = () => {
-    user.value = null
-    token.value = null
-    refreshToken.value = null
-    localStorage.removeItem('token')
-    localStorage.removeItem('refreshToken')
-    localStorage.removeItem('user')
+    user.value = { ...defaultUser, ...userData }
+    localStorage.setItem('user', JSON.stringify(user.value))
   }
 
   // 初始化用户信息
   const initUser = async () => {
     const storedUser = localStorage.getItem('user')
-    const storedToken = localStorage.getItem('token')
-    
-    if (storedUser && storedToken) {
+    if (storedUser) {
       try {
-        user.value = JSON.parse(storedUser)
-        token.value = storedToken
-        
-        // 验证token是否有效
-        await authAPI.verifyToken()
-        
-        // 获取最新用户信息
-        await fetchUserProfile()
+        const userData = JSON.parse(storedUser)
+        user.value = { ...defaultUser, ...userData }
       } catch (error) {
-        console.error('Token verification failed:', error)
-        clearUser()
+        console.error('Parse stored user failed:', error)
+        user.value = defaultUser
       }
     }
   }
@@ -133,40 +113,9 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  // 登出
-  const logout = async () => {
-    try {
-      await authAPI.logout()
-    } catch (error) {
-      console.error('Logout error:', error)
-    } finally {
-      clearUser()
-    }
-  }
-
-  // 刷新token
-  const refreshAccessToken = async () => {
-    try {
-      if (!refreshToken.value) {
-        throw new Error('No refresh token available')
-      }
-      
-      const response = await authAPI.refreshToken(refreshToken.value)
-      setToken(response.token, response.refreshToken)
-      
-      return response.token
-    } catch (error) {
-      console.error('Refresh token error:', error)
-      clearUser()
-      throw error
-    }
-  }
-
   return {
     // 状态
     user,
-    token,
-    refreshToken,
     isLoading,
     
     // 计算属性
@@ -178,14 +127,10 @@ export const useUserStore = defineStore('user', () => {
     
     // 方法
     setUser,
-    setToken,
-    clearUser,
     initUser,
     fetchUserProfile,
     updateProfile,
     changePassword,
-    uploadAvatar,
-    logout,
-    refreshAccessToken
+    uploadAvatar
   }
 })

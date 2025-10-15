@@ -49,7 +49,29 @@ export const usersAPI = {
   // 管理员：更新用户状态
   updateUserStatus(id, data) {
     return api.put(`/users/${id}/status`, data)
+  },
+
+  // 别名函数，保持向后兼容
+  getUserProfile() {
+    return this.getCurrentUser()
+  },
+
+  updateUserProfile(data) {
+    return this.updateProfile(data)
   }
 }
+
+// 命名导出，支持 import * as usersAPI 的方式
+export const getCurrentUser = usersAPI.getCurrentUser.bind(usersAPI)
+export const updateProfile = usersAPI.updateProfile.bind(usersAPI)
+export const changePassword = usersAPI.changePassword.bind(usersAPI)
+export const uploadAvatar = usersAPI.uploadAvatar.bind(usersAPI)
+export const getTeamMembers = usersAPI.getTeamMembers.bind(usersAPI)
+export const getNotificationSettings = usersAPI.getNotificationSettings.bind(usersAPI)
+export const updateNotificationSettings = usersAPI.updateNotificationSettings.bind(usersAPI)
+export const getAllUsers = usersAPI.getAllUsers.bind(usersAPI)
+export const updateUserStatus = usersAPI.updateUserStatus.bind(usersAPI)
+export const getUserProfile = usersAPI.getUserProfile.bind(usersAPI)
+export const updateUserProfile = usersAPI.updateUserProfile.bind(usersAPI)
 
 export default usersAPI

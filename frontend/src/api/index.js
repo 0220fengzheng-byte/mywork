@@ -14,11 +14,6 @@ const api = axios.create({
 // 请求拦截器
 api.interceptors.request.use(
   config => {
-    // 添加token到请求头
-    const token = localStorage.getItem('token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
     return config
   },
   error => {
@@ -36,13 +31,6 @@ api.interceptors.response.use(
     
     if (response) {
       switch (response.status) {
-        case 401:
-          // 未授权，清除token并跳转到登录页
-          localStorage.removeItem('token')
-          localStorage.removeItem('user')
-          router.push('/login')
-          ElMessage.error('登录已过期，请重新登录')
-          break
         case 403:
           ElMessage.error('没有权限访问')
           break
