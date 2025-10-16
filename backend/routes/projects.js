@@ -70,7 +70,7 @@ router.get('/', auth, [
       requesterId,
       search,
       view,
-      sortBy = 'createdAt',
+      sortBy = 'created_at',
       sortOrder = 'desc'
     } = req.query;
 

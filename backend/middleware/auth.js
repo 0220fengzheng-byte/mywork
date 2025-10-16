@@ -4,6 +4,24 @@ const supabaseUserService = new SupabaseUserService();
 
 const auth = async (req, res, next) => {
   try {
+    // 在开发环境下跳过认证，使用默认用户
+    if (process.env.NODE_ENV === 'development') {
+      req.user = {
+        _id: '550e8400-e29b-41d4-a716-446655440000',
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        name: '开发用户',
+        email: 'dev@example.com',
+        department: '开发部门',
+        role: 'admin',
+        is_active: true,
+        avatar: null,
+        phone: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      return next();
+    }
+
     const token = req.header('Authorization')?.replace('Bearer ', '');
     
     if (!token) {

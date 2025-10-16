@@ -45,6 +45,11 @@ const upload = multer({
 // 获取个人信息
 router.get('/profile', auth, async (req, res) => {
   try {
+    // 在开发环境下直接返回当前用户信息
+    if (process.env.NODE_ENV === 'development') {
+      return res.json(req.user);
+    }
+    
     const user = await supabaseUserService.findById(req.user._id);
     if (!user) {
       return res.status(404).json({ message: '用户不存在' });
